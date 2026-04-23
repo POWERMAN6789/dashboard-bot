@@ -3,7 +3,7 @@ const express = require('express');
 const fs = require('fs');
 
 // =====================
-// CONFIG
+// ENV VARIABLES
 // =====================
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -17,14 +17,29 @@ const client = new Client({
 });
 
 // =====================
-// DASHBOARD SERVER
+// EXPRESS DASHBOARD
 // =====================
 const app = express();
 app.use(express.json());
 
-// Home page
+// Home dashboard UI
 app.get('/', (req, res) => {
-  res.send('Dashboard running');
+  res.send(`
+    <h1>Discord Bot Dashboard</h1>
+    <p>Status: Running</p>
+
+    <button onclick="fetch('/status').then(r => r.json()).then(d => alert(JSON.stringify(d)))">
+      Check Bot Status
+    </button>
+  `);
+});
+
+// Status route
+app.get('/status', (req, res) => {
+  res.json({
+    status: 'online',
+    uptime: process.uptime()
+  });
 });
 
 // Get commands
@@ -44,10 +59,10 @@ app.post('/commands', (req, res) => {
   res.json({ success: true });
 });
 
-// Render needs a port
+// Render port fix
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('Dashboard running on port', PORT);
+  console.log(`🌐 Dashboard running on port ${PORT}`);
 });
 
 // =====================
@@ -67,7 +82,7 @@ function buildCommands() {
       .setDescription(cmd.description)
       .addStringOption(opt =>
         opt.setName('text')
-          .setDescription('text')
+          .setDescription('Text input')
           .setRequired(false)
       )
       .toJSON()
@@ -75,22 +90,22 @@ function buildCommands() {
 }
 
 // =====================
-// REGISTER COMMANDS
+// REGISTER SLASH COMMANDS
 // =====================
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 async function registerCommands() {
   try {
-    console.log('Registering commands...');
+    console.log('Registering slash commands...');
 
     await rest.put(
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
       { body: buildCommands() }
     );
 
-    console.log('Commands registered.');
+    console.log('Slash commands registered.');
   } catch (err) {
-    console.error(err);
+    console.error('Command registration error:', err);
   }
 }
 
@@ -98,13 +113,23 @@ async function registerCommands() {
 // BOT READY
 // =====================
 client.once('ready', async () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`🤖 Logged in as ${client.user.tag}`);
 
   await registerCommands();
+
+  client.user.setPresence({
+    status: 'online',
+    activities: [
+      {
+        name: 'Dashboard system running',
+        type: 0
+      }
+    ]
+  });
 });
 
 // =====================
-// HANDLE COMMANDS
+// HANDLE SLASH COMMANDS
 // =====================
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -116,7 +141,7 @@ client.on('interactionCreate', async interaction => {
 
   if (cmd.type === 'echo') {
     const text = interaction.options.getString('text');
-    await interaction.reply(text || 'Nothing to echo');
+    await interaction.reply(text || 'No text provided');
   }
 
   if (cmd.type === 'ping') {
