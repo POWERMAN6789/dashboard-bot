@@ -19,144 +19,259 @@ const app = express();
 app.use(express.json());
 
 // =====================
-// STORAGE
+// DATABASE (JSON)
 // =====================
-function loadCommands() {
-  if (!fs.existsSync('./commands.json')) return [];
-  return JSON.parse(fs.readFileSync('./commands.json'));
+function load() {
+  if (!fs.existsSync('./db.json')) return [];
+  return JSON.parse(fs.readFileSync('./db.json'));
 }
 
-function saveCommands(data) {
-  fs.writeFileSync('./commands.json', JSON.stringify(data, null, 2));
+function save(data) {
+  fs.writeFileSync('./db.json', JSON.stringify(data, null, 2));
 }
 
 // =====================
-// ACTION ENGINE
+// BLOCK ENGINE (CORE)
 // =====================
-async function runActions(context, actions) {
-  for (const action of actions) {
+async function runBlocks(ctx, blocks) {
+  for (const b of blocks) {
 
-    // 💬 reply
-    if (action.type === 'reply') {
-      if (context.reply) await context.reply(action.text);
-    }
+    switch (b.type) {
 
-    // 📢 send message
-    if (action.type === 'sendMessage') {
-      const ch = await client.channels.fetch(action.channel);
-      await ch.send(action.text);
-    }
+      case 'reply':
+        if (ctx.reply) await ctx.reply(b.text);
+        break;
 
-    // 👤 DM user
-    if (action.type === 'dmUserById') {
-      const user = await client.users.fetch(action.userId);
-      await user.send(action.text);
-    }
+      case 'sendMessage': {
+        const ch = await client.channels.fetch(b.channel);
+        await ch.send(b.text);
+        break;
+      }
 
-    // ⏱ delay
-    if (action.type === 'delay') {
-      await new Promise(r => setTimeout(r, action.ms || 1000));
-    }
+      case 'dmUser': {
+        const user = await client.users.fetch(b.userId);
+        await user.send(b.text);
+        break;
+      }
 
-    // 📢 log
-    if (action.type === 'log') {
-      console.log(action.text);
+      case 'delay':
+        await new Promise(r => setTimeout(r, b.ms || 1000));
+        break;
+
+      case 'log':
+        console.log('[LOG]', b.text);
+        break;
+
+      case 'embed':
+        if (ctx.reply) {
+          await ctx.reply({
+            embeds: [{
+              title: b.title,
+              description: b.description,
+              color: 0x3b82f6
+            }]
+          });
+        }
+        break;
+
+      case 'random': {
+        const pick = b.options[Math.floor(Math.random() * b.options.length)];
+        if (ctx.reply) await ctx.reply(pick);
+        break;
+      }
+
     }
   }
 }
 
 // =====================
-// DASHBOARD UI
+// DASHBOARD EXECUTOR
+// =====================
+async function runDashboardEvent(name) {
+  const db = load();
+  const cmd = db.find(x => x.name === name);
+
+  if (!cmd) return;
+
+  await runBlocks(
+    {
+      reply: async (msg) => console.log('[DASHBOARD]', msg)
+    },
+    cmd.blocks || []
+  );
+}
+
+// =====================
+// DASHBOARD UI (PROFESSIONAL)
 // =====================
 app.get('/', (req, res) => {
-  const cmds = loadCommands();
+  const db = load();
 
   res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<title>Bot Dashboard</title>
+<title>Control Panel</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+
 <style>
-body { font-family: Arial; background:#111; color:white; padding:20px; }
-input, select { padding:8px; margin:5px; }
-button { padding:8px; cursor:pointer; }
-table { width:100%; margin-top:20px; }
-td, th { border:1px solid #444; padding:8px; }
+body {
+  margin:0;
+  font-family: Inter;
+  background:#0b0f19;
+  color:white;
+  display:flex;
+}
+
+.sidebar {
+  width:260px;
+  background:#111827;
+  padding:20px;
+}
+
+.sidebar h2 {
+  font-size:14px;
+  color:#94a3b8;
+}
+
+.btn {
+  width:100%;
+  margin-top:10px;
+  padding:10px;
+  background:#1f2937;
+  border:none;
+  color:white;
+  border-radius:8px;
+  cursor:pointer;
+}
+
+.btn:hover { background:#374151; }
+
+.main {
+  flex:1;
+  padding:25px;
+}
+
+.card {
+  background:#111827;
+  padding:20px;
+  border-radius:12px;
+  margin-bottom:15px;
+}
+
+input, select {
+  width:100%;
+  padding:10px;
+  margin:6px 0;
+  border-radius:8px;
+  border:none;
+  background:#0f172a;
+  color:white;
+}
+
+.block {
+  background:#0f172a;
+  padding:10px;
+  margin:5px 0;
+  border-radius:8px;
+}
+
+small { color:#94a3b8; }
 </style>
+
 </head>
+
 <body>
 
-<h1>🤖 Bot Dashboard</h1>
+<div class="sidebar">
+  <h2>CONTROL PANEL</h2>
 
-<h2>Create Event</h2>
+  <button class="btn" onclick="show('builder')">🧱 Block Builder</button>
+  <button class="btn" onclick="show('events')">📜 Events</button>
+  <button class="btn" onclick="show('run')">⚡ Run Event</button>
+</div>
 
-<input id="name" placeholder="event name" />
+<div class="main">
 
-<select id="trigger">
-  <option value="slash">Slash Command</option>
-  <option value="dashboard">Dashboard Event</option>
-</select>
+<!-- BUILDER -->
+<div id="builder" class="card">
+  <h2>Create Block Command</h2>
 
-<br>
+  <input id="name" placeholder="command name" />
 
-<select id="action">
-  <option value="reply">Reply</option>
-  <option value="sendMessage">Send Message</option>
-  <option value="dmUserById">DM User (by ID)</option>
-  <option value="log">Log</option>
-</select>
+  <select id="trigger">
+    <option value="dashboard">Dashboard</option>
+    <option value="slash">Slash</option>
+  </select>
 
-<br>
+  <h3>Block</h3>
 
-<input id="text" placeholder="text/message" />
-<input id="channel" placeholder="channel ID (if needed)" />
-<input id="userId" placeholder="user ID (DM only)" />
+  <select id="type">
+    <option value="reply">Reply</option>
+    <option value="sendMessage">Send Message</option>
+    <option value="dmUser">DM User</option>
+    <option value="delay">Delay</option>
+    <option value="log">Log</option>
+  </select>
 
-<br>
+  <input id="text" placeholder="text" />
+  <input id="channel" placeholder="channel id" />
+  <input id="userId" placeholder="user id" />
+  <input id="ms" placeholder="delay ms" />
 
-<button onclick="create()">Create</button>
+  <button onclick="create()">Create Event</button>
+</div>
 
-<hr>
+<!-- EVENTS -->
+<div id="events" class="card" style="display:none">
+  <h2>All Events</h2>
 
-<h2>Dashboard Events</h2>
-<select id="eventList">
-  ${cmds.filter(c => c.trigger === 'dashboard').map(c =>
-    `<option value="${c.name}">${c.name}</option>`
-  ).join('')}
-</select>
+  ${db.map(c => `
+    <div class="block">
+      <b>${c.name}</b><br>
+      <small>${c.trigger}</small>
+    </div>
+  `).join('')}
+</div>
 
-<button onclick="runEvent()">Run Event</button>
+<!-- RUN -->
+<div id="run" class="card" style="display:none">
+  <h2>Run Dashboard Event</h2>
 
-<hr>
+  <select id="eventList">
+    ${db.filter(x => x.trigger === 'dashboard').map(c =>
+      `<option value="${c.name}">${c.name}</option>`
+    ).join('')}
+  </select>
 
-<h2>All Events</h2>
+  <button onclick="run()">Run</button>
+</div>
 
-<table>
-<tr><th>Name</th><th>Trigger</th></tr>
-
-${cmds.map(c => `
-<tr>
-<td>${c.name}</td>
-<td>${c.trigger}</td>
-</tr>
-`).join('')}
-
-</table>
+</div>
 
 <script>
+function show(id) {
+  builder.style.display = 'none';
+  events.style.display = 'none';
+  run.style.display = 'none';
+  document.getElementById(id).style.display = 'block';
+}
+
 async function create() {
-  await fetch('/commands', {
+  await fetch('/create', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      name: document.getElementById('name').value,
-      trigger: document.getElementById('trigger').value,
-      actions: [
+      name: name.value,
+      trigger: trigger.value,
+      blocks: [
         {
-          type: document.getElementById('action').value,
-          text: document.getElementById('text').value,
-          channel: document.getElementById('channel').value,
-          userId: document.getElementById('userId').value
+          type: type.value,
+          text: text.value,
+          channel: channel.value,
+          userId: userId.value,
+          ms: Number(ms.value)
         }
       ]
     })
@@ -165,12 +280,9 @@ async function create() {
   location.reload();
 }
 
-async function runEvent() {
-  const name = document.getElementById('eventList').value;
-
-  await fetch('/trigger/' + name, { method: 'POST' });
-
-  alert('Event executed');
+async function run() {
+  await fetch('/run/' + eventList.value, { method:'POST' });
+  alert('Executed');
 }
 </script>
 
@@ -180,52 +292,36 @@ async function runEvent() {
 });
 
 // =====================
-// CREATE COMMAND
+// CREATE
 // =====================
-app.post('/commands', (req, res) => {
-  const cmds = loadCommands();
-  cmds.push(req.body);
-  saveCommands(cmds);
-  res.json({ success: true });
+app.post('/create', (req, res) => {
+  const db = load();
+  db.push(req.body);
+  save(db);
+  res.json({ ok: true });
 });
 
 // =====================
-// DASHBOARD TRIGGER
+// RUN DASHBOARD EVENT
 // =====================
-app.post('/trigger/:name', async (req, res) => {
-  const cmd = loadCommands().find(c => c.name === req.params.name);
-
-  if (!cmd) return res.json({ error: 'not found' });
-
-  await runActions(
-    {
-      reply: async (msg) => console.log('[DASHBOARD]', msg)
-    },
-    cmd.actions
-  );
-
-  res.json({ success: true });
+app.post('/run/:name', async (req, res) => {
+  await runDashboardEvent(req.params.name);
+  res.json({ ok: true });
 });
 
 // =====================
 // SLASH COMMANDS
 // =====================
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+client.on('interactionCreate', async i => {
+  if (!i.isChatInputCommand()) return;
 
-  const cmd = loadCommands().find(c =>
-    c.name === interaction.commandName && c.trigger === 'slash'
-  );
-
+  const cmd = load().find(x => x.name === i.commandName && x.trigger === 'slash');
   if (!cmd) return;
 
-  await runActions(interaction, cmd.actions);
+  await runBlocks(i, cmd.blocks || []);
 });
 
 // =====================
-// LOGIN
-// =====================
 client.login(TOKEN);
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Dashboard running on', PORT));
+app.listen(3000, () => console.log('Dashboard running'));
