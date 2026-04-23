@@ -1,0 +1,12 @@
+[
+  {
+    "name": "echo",
+    "description": "Echo command",
+    "type": "echo"
+  },
+  {
+    "name": "ping",
+    "description": "Ping command",
+    "type": "ping"
+  }
+]
