@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
 
@@ -7,13 +7,12 @@ const fs = require('fs');
 // =====================
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
 
 // =====================
 // INIT
 // =====================
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
 const app = express();
@@ -32,153 +31,38 @@ function saveCommands(data) {
 }
 
 // =====================
-// ACTION ENGINE (CORE)
+// ACTION ENGINE
 // =====================
-async function runActions(interaction, actions) {
-  const vars = {
-    user: interaction.user,
-    guild: interaction.guild
-  };
-
+async function runActions(context, actions) {
   for (const action of actions) {
 
-    switch (action.type) {
+    // 💬 reply
+    if (action.type === 'reply') {
+      if (context.reply) await context.reply(action.text);
+    }
 
-      // =====================
-      // 💬 MESSAGING ACTIONS
-      // =====================
-      case 'reply':
-        await interaction.reply(replaceVars(action.text, vars));
-        break;
+    // 📢 send message
+    if (action.type === 'sendMessage') {
+      const ch = await client.channels.fetch(action.channel);
+      await ch.send(action.text);
+    }
 
-      case 'followUp':
-        await interaction.followUp(replaceVars(action.text, vars));
-        break;
+    // 👤 DM user
+    if (action.type === 'dmUserById') {
+      const user = await client.users.fetch(action.userId);
+      await user.send(action.text);
+    }
 
-      case 'sendMessage': {
-        const ch = await client.channels.fetch(action.channel);
-        await ch.send(replaceVars(action.text, vars));
-        break;
-      }
+    // ⏱ delay
+    if (action.type === 'delay') {
+      await new Promise(r => setTimeout(r, action.ms || 1000));
+    }
 
-      case 'dmUser':
-        await interaction.user.send(replaceVars(action.text, vars));
-        break;
-
-      case 'editReply':
-        await interaction.editReply(replaceVars(action.text, vars));
-        break;
-
-      // =====================
-      // ⏱ TIMING
-      // =====================
-      case 'delay':
-        await new Promise(r => setTimeout(r, action.ms || 1000));
-        break;
-
-      // =====================
-      // 🎲 RANDOM
-      // =====================
-      case 'randomMessage': {
-        const msg = action.options[Math.floor(Math.random() * action.options.length)];
-        await interaction.reply(replaceVars(msg, vars));
-        break;
-      }
-
-      // =====================
-      // 📊 EMBEDS (simple)
-      // =====================
-      case 'embed':
-        await interaction.reply({
-          embeds: [{
-            title: replaceVars(action.title, vars),
-            description: replaceVars(action.description, vars),
-            color: action.color || 0x00ff00
-          }]
-        });
-        break;
-
-      // =====================
-      // 🧠 USER INFO
-      // =====================
-      case 'getUsername':
-        await interaction.reply(interaction.user.username);
-        break;
-
-      case 'getServerName':
-        await interaction.reply(interaction.guild.name);
-        break;
-
-      case 'getUserId':
-        await interaction.reply(interaction.user.id);
-        break;
-
-      // =====================
-      // 🔢 COUNTERS
-      // =====================
-      case 'counterAdd':
-        action.value = (action.value || 0) + 1;
-        break;
-
-      case 'counterSet':
-        action.value = action.number;
-        break;
-
-      // =====================
-      // 📢 LOGGING
-      // =====================
-      case 'log':
-        console.log(replaceVars(action.text, vars));
-        break;
-
-      // =====================
-      // 🔄 REACTION
-      // =====================
-      case 'react':
-        await interaction.reply('Reacting...');
-        const msg = await interaction.fetchReply();
-        await msg.react(action.emoji);
-        break;
-
-      // =====================
-      // 🎯 CONDITIONALS
-      // =====================
-      case 'ifContains':
-        if (interaction.commandName.includes(action.contains)) {
-          await runActions(interaction, action.then || []);
-        } else {
-          await runActions(interaction, action.else || []);
-        }
-        break;
-
-      // =====================
-      // 🔀 LOOP
-      // =====================
-      case 'repeat':
-        for (let i = 0; i < (action.times || 1); i++) {
-          await runActions(interaction, action.actions || []);
-        }
-        break;
-
-      // =====================
-      // ⚠ UNKNOWN
-      // =====================
-      default:
-        console.log('Unknown action:', action.type);
-        break;
+    // 📢 log
+    if (action.type === 'log') {
+      console.log(action.text);
     }
   }
-}
-
-// =====================
-// VARIABLE REPLACER
-// =====================
-function replaceVars(text, vars) {
-  if (!text) return '';
-  return text
-    .replaceAll('{user}', vars.user.username)
-    .replaceAll('{userid}', vars.user.id)
-    .replaceAll('{server}', vars.guild?.name || 'DM');
 }
 
 // =====================
@@ -191,10 +75,10 @@ app.get('/', (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-<title>Bot Builder</title>
+<title>Bot Dashboard</title>
 <style>
 body { font-family: Arial; background:#111; color:white; padding:20px; }
-input, select { margin:5px; padding:6px; }
+input, select { padding:8px; margin:5px; }
 button { padding:8px; cursor:pointer; }
 table { width:100%; margin-top:20px; }
 td, th { border:1px solid #444; padding:8px; }
@@ -202,52 +86,91 @@ td, th { border:1px solid #444; padding:8px; }
 </head>
 <body>
 
-<h1>🤖 Block Bot Dashboard</h1>
+<h1>🤖 Bot Dashboard</h1>
 
-<h3>Create Command</h3>
+<h2>Create Event</h2>
 
-<input id="name" placeholder="command name" />
+<input id="name" placeholder="event name" />
 
-<select id="type">
-  <option value="reply">reply</option>
-  <option value="dmUser">dmUser</option>
-  <option value="embed">embed</option>
-  <option value="randomMessage">randomMessage</option>
-  <option value="sendMessage">sendMessage</option>
+<select id="trigger">
+  <option value="slash">Slash Command</option>
+  <option value="dashboard">Dashboard Event</option>
 </select>
 
-<input id="text" placeholder="text / message" />
+<br>
 
-<button onclick="add()">Add</button>
+<select id="action">
+  <option value="reply">Reply</option>
+  <option value="sendMessage">Send Message</option>
+  <option value="dmUserById">DM User (by ID)</option>
+  <option value="log">Log</option>
+</select>
+
+<br>
+
+<input id="text" placeholder="text/message" />
+<input id="channel" placeholder="channel ID (if needed)" />
+<input id="userId" placeholder="user ID (DM only)" />
+
+<br>
+
+<button onclick="create()">Create</button>
 
 <hr>
 
+<h2>Dashboard Events</h2>
+<select id="eventList">
+  ${cmds.filter(c => c.trigger === 'dashboard').map(c =>
+    `<option value="${c.name}">${c.name}</option>`
+  ).join('')}
+</select>
+
+<button onclick="runEvent()">Run Event</button>
+
+<hr>
+
+<h2>All Events</h2>
+
 <table>
-<tr><th>Name</th><th>Type</th></tr>
+<tr><th>Name</th><th>Trigger</th></tr>
 
 ${cmds.map(c => `
 <tr>
 <td>${c.name}</td>
-<td>${c.actions?.[0]?.type || 'unknown'}</td>
+<td>${c.trigger}</td>
 </tr>
 `).join('')}
 
 </table>
 
 <script>
-async function add() {
+async function create() {
   await fetch('/commands', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
       name: document.getElementById('name').value,
+      trigger: document.getElementById('trigger').value,
       actions: [
-        { type: document.getElementById('type').value, text: document.getElementById('text').value }
+        {
+          type: document.getElementById('action').value,
+          text: document.getElementById('text').value,
+          channel: document.getElementById('channel').value,
+          userId: document.getElementById('userId').value
+        }
       ]
     })
   });
 
   location.reload();
+}
+
+async function runEvent() {
+  const name = document.getElementById('eventList').value;
+
+  await fetch('/trigger/' + name, { method: 'POST' });
+
+  alert('Event executed');
 }
 </script>
 
@@ -257,59 +180,50 @@ async function add() {
 });
 
 // =====================
-// API
+// CREATE COMMAND
 // =====================
 app.post('/commands', (req, res) => {
   const cmds = loadCommands();
   cmds.push(req.body);
   saveCommands(cmds);
+  res.json({ success: true });
+});
 
-  registerCommands();
+// =====================
+// DASHBOARD TRIGGER
+// =====================
+app.post('/trigger/:name', async (req, res) => {
+  const cmd = loadCommands().find(c => c.name === req.params.name);
+
+  if (!cmd) return res.json({ error: 'not found' });
+
+  await runActions(
+    {
+      reply: async (msg) => console.log('[DASHBOARD]', msg)
+    },
+    cmd.actions
+  );
+
   res.json({ success: true });
 });
 
 // =====================
 // SLASH COMMANDS
 // =====================
-function buildCommands() {
-  return loadCommands().map(cmd =>
-    new SlashCommandBuilder()
-      .setName(cmd.name)
-      .setDescription(cmd.description || 'block command')
-      .toJSON()
-  );
-}
-
-const rest = new REST({ version: '10' }).setToken(TOKEN);
-
-async function registerCommands() {
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: buildCommands() }
-    );
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-// =====================
-// EXECUTION
-// =====================
-client.once('ready', async () => {
-  console.log(`Logged in as ${client.user.tag}`);
-  await registerCommands();
-});
-
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  const cmd = loadCommands().find(c => c.name === interaction.commandName);
+  const cmd = loadCommands().find(c =>
+    c.name === interaction.commandName && c.trigger === 'slash'
+  );
+
   if (!cmd) return;
 
-  await runActions(interaction, cmd.actions || []);
+  await runActions(interaction, cmd.actions);
 });
 
+// =====================
+// LOGIN
 // =====================
 client.login(TOKEN);
 
